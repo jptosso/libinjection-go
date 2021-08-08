@@ -72,14 +72,6 @@ type keyword_t struct {
 	Type byte
 }
 
-type Sqli struct {
-	S        string
-	Lookup   string
-	userdata int
-	Flags    int
-	current  int
-}
-
 type libinjection_sqli_state struct {
 	/*
 	 * input, does not need to be null terminated.
@@ -550,11 +542,11 @@ func parse_string_core(cs []byte, l int, pos int, st *stoken_t, delim byte, offs
 			return l
 		} else if is_backslash_escaped(cs, qpos-1, pos+offset) {
 			/* keep going, move ahead one character */
-			qpos = memchr(cs[qpos+1:], delim, l-qpos+1)
+			qpos = memchr(cs[qpos+1:], delim, l-(qpos+1))
 			continue
 		} else if is_double_delim_escaped(cs[qpos:], l) {
 			/* keep going, move ahead two characters */
-			qpos = memchr(cs[qpos+2:], delim, l-qpos+2)
+			qpos = memchr(cs[qpos+2:], delim, l-(qpos+2))
 			continue
 		} else {
 			/* hey it's a normal string */
@@ -1111,12 +1103,17 @@ func libinjection_sqli_init(s []byte, l int, flags int) *libinjection_sqli_state
 	if flags == 0 {
 		flags = FLAG_QUOTE_NONE | FLAG_SQL_ANSI
 	}
+	tokens := []*stoken_t{}
+	for i := 0; i < 8; i++ {
+		tokens = append(tokens, new(stoken_t))
+	}
 	return &libinjection_sqli_state{
 		S:        s,
 		Slen:     l,
 		Userdata: 0,
 		Flags:    flags,
 		Current:  new(stoken_t),
+		Tokenvec: tokens,
 	}
 }
 

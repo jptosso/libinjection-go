@@ -109,7 +109,7 @@ func my_memmem(haystack []byte, hlen int, needle []byte, nlen int) int {
 }
 
 func st_clear(t **stoken_t) {
-	*t = nil
+	*t = new(stoken_t) //nil
 }
 
 /** Find largest string containing certain characters.
