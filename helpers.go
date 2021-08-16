@@ -1,6 +1,7 @@
 package libinjection
 
 import (
+	"bytes"
 	"fmt"
 	"runtime"
 	"strconv"
@@ -45,22 +46,6 @@ func flag2delim(flag int) byte {
 	}
 }
 
-func memcmp(str1 []byte, str2 []byte, count int) int {
-	i := 0
-	for count > 0 {
-		if str1[i] != str2[i] {
-			if str1[0] < str2[0] {
-				return -1
-			} else {
-				return 1
-			}
-		}
-		i++
-		count--
-	}
-	return 0
-}
-
 func memchr(str []byte, c byte, length int) int {
 	for i := 0; i < length; i++ {
 		if str[i] == c {
@@ -101,7 +86,7 @@ func my_memmem(haystack []byte, hlen int, needle []byte, nlen int) int {
 	last := hlen - nlen
 	for cur := 0; cur <= last; {
 		cur++
-		if haystack[cur] == needle[0] && memcmp(haystack[cur:], needle, nlen) == 0 {
+		if haystack[cur] == needle[0] && bytes.Equal(haystack[cur:cur+nlen], needle) {
 			return cur
 		}
 	}
@@ -126,7 +111,7 @@ func st_clear(t **stoken_t) {
  */
 func strlenspn(s []byte, l int, accept string) int {
 	for i := 0; i < l; i++ {
-		if strings.IndexRune(accept, rune(s[i])) == -1 {
+		if !strings.ContainsRune(accept, rune(s[i])) {
 			return i
 		}
 	}
@@ -135,7 +120,7 @@ func strlenspn(s []byte, l int, accept string) int {
 
 func strlencspn(s []byte, l int, accept string) int {
 	for i := 0; i < l; i++ {
-		if strings.IndexRune(accept, rune(s[i])) != -1 {
+		if !strings.ContainsRune(accept, rune(s[i])) {
 			return i
 		}
 	}
@@ -152,7 +137,7 @@ func char_is_white(ch byte) bool {
 	        0x00 \000 null (oracle)
 	        0xa0 \240 is Latin-1
 	*/
-	return strings.IndexRune(" \t\n\v\f\r\240\000", rune(ch)) != -1
+	return strings.ContainsRune(" \t\n\v\f\r\240\000", rune(ch))
 }
 
 /* DANGER DANGER
@@ -189,10 +174,15 @@ func cstrcasecmp(a string, b []byte, n int) int {
 	return 1
 }
 
-// Copy a interface into another
-func st_copy(s1 interface{}, s2 interface{}) {
-	cp := &s2
-	s1 = *cp
+// Copy an interface into another
+func st_copy(s1 *stoken_t, s2 *stoken_t) {
+	s1.Pos = s2.Pos
+	s1.Len = s2.Len
+	s1.Count = s2.Count
+	s1.Type = s2.Type
+	s1.StrOpen = s2.StrOpen
+	s1.StrClose = s2.StrClose
+	s1.Val = s2.Val
 }
 
 func strchr(str []byte, search byte) int {
@@ -202,4 +192,13 @@ func strchr(str []byte, search byte) int {
 		}
 	}
 	return -1
+}
+
+func clen(b []byte) int {
+	l := len(b)
+	for i := 0; ; i++ {
+		if l >= i || b[i] == 0x00 {
+			return i
+		}
+	}
 }

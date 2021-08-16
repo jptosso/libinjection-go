@@ -1,6 +1,9 @@
 package libinjection
 
-import "unicode"
+import (
+	"bytes"
+	"unicode"
+)
 
 const (
 	//flags
@@ -215,7 +218,6 @@ func st_assign(st *stoken_t, stype byte, pos int, l int, value []byte) {
 	st.Pos = pos
 	st.Len = last
 	st.Val = value[:last]
-	//TODO check: st.Val[last] = CHAR_NULL
 }
 
 func st_is_arithmetic_op(st *stoken_t) bool {
@@ -282,7 +284,7 @@ func parse_eol_comment(sf *libinjection_sqli_state) int {
 	pos := sf.Pos
 	slen := sf.Slen
 
-	endpos := memchr(cs[pos:], '\n', slen-pos)
+	endpos := bytes.IndexByte(cs[pos:pos+slen], '\n')
 	if endpos == -1 {
 		st_assign(sf.Current, TYPE_COMMENT, pos, slen-pos, cs[pos:])
 		return slen
@@ -486,20 +488,21 @@ func parse_operator2(sf *libinjection_sqli_state) int {
  *       " \\"   "  two backslash = not escaped!
  *       "\\\"   "  three backslash = escaped!
  */
-func is_backslash_escaped(str []byte, end int, start int) bool {
+func is_backslash_escaped(str []byte) bool {
 	var ptr int
-	for ptr = end; ptr >= start; ptr-- {
+	end := len(str) - 1
+	for ptr = end; ptr >= 0; ptr-- {
 		if str[ptr] != '\\' {
 			break
 		}
 	}
 	/* if number of backslashes is odd, it is escaped */
 
-	return str[end-ptr]&1 == 1
+	return (end-ptr)%2 != 0
 }
 
-func is_double_delim_escaped(cur []byte, end int) bool {
-	return 1 < end && cur[1] == cur[0]
+func is_double_delim_escaped(cur []byte) bool {
+	return 1 < len(cur)-1 && cur[1] == cur[0]
 }
 
 /* Look forward for doubling of delimiter
@@ -514,7 +517,8 @@ func parse_string_core(cs []byte, l int, pos int, st *stoken_t, delim byte, offs
 	/*
 	 * offset is to skip the perhaps first quote char
 	 */
-	qpos := memchr(cs[pos+offset:], delim, l-pos-offset)
+	// super maths!
+	qpos := pos + offset + bytes.IndexByte(cs[pos+offset:(l-pos-offset)+(pos+offset)], delim)
 
 	/*
 	 * then keep string open/close info
@@ -540,13 +544,13 @@ func parse_string_core(cs []byte, l int, pos int, st *stoken_t, delim byte, offs
 			st_assign(st, TYPE_STRING, pos+offset, l-pos-offset, cs[pos+offset:])
 			st.StrClose = CHAR_NULL
 			return l
-		} else if is_backslash_escaped(cs, qpos-1, pos+offset) {
+		} else if is_backslash_escaped(cs[qpos-1 : qpos-1+pos+offset]) {
 			/* keep going, move ahead one character */
-			qpos = memchr(cs[qpos+1:], delim, l-(qpos+1))
+			qpos = bytes.IndexByte(cs[qpos+1:qpos+1+(l-(qpos+1))], delim)
 			continue
-		} else if is_double_delim_escaped(cs[qpos:], l) {
+		} else if is_double_delim_escaped(cs[qpos:]) {
 			/* keep going, move ahead two characters */
-			qpos = memchr(cs[qpos+2:], delim, l-(qpos+2))
+			qpos = bytes.IndexByte(cs[qpos+2:qpos+2+(l-(qpos+2))], delim)
 			continue
 		} else {
 			/* hey it's a normal string */
@@ -636,19 +640,15 @@ func parse_qstring_core(sf *libinjection_sqli_state, offset int) int {
 	switch ch {
 	case '(':
 		ch = ')'
-		break
 	case '[':
 		ch = ']'
-		break
 	case '{':
 		ch = '}'
-		break
 	case '<':
 		ch = '>'
-		break
 	}
 
-	strend = memchr2(cs[pos+3:], slen-pos-3, ch, '\'')
+	strend = bytes.IndexAny(cs[pos+3:slen+pos+3], string([]byte{ch, '\''}))
 	if strend == -1 {
 		st_assign(sf.Current, TYPE_STRING, pos+3, slen-pos-3, cs[pos+3:])
 		sf.Current.StrOpen = 'q'
@@ -744,7 +744,7 @@ func parse_xstring(sf *libinjection_sqli_state) int {
 func parse_bword(sf *libinjection_sqli_state) int {
 	cs := sf.S
 	pos := sf.Pos
-	endptr := memchr(cs[pos:], ']', sf.Slen-pos)
+	endptr := bytes.IndexByte(cs[pos:pos+(sf.Slen-pos)], ']')
 	if endptr == -1 {
 		st_assign(sf.Current, TYPE_BAREWORD, pos, sf.Slen-pos, cs[pos:])
 		return sf.Slen
@@ -896,7 +896,8 @@ func parse_money(sf *libinjection_sqli_state) int {
 	if xlen == 0 {
 		if cs[pos+1] == '$' {
 			/* we have $$ .. find ending $$ and make string */
-			strend = memchr2(cs[pos+2:], slen-pos-2, '$', '$')
+			//TODO check
+			strend = bytes.IndexAny(cs[pos+2:], string("$$"))
 			if strend == -1 {
 				/* fell off edge */
 				st_assign(sf.Current, TYPE_STRING, pos+2, slen-(pos+2), cs[pos+2:])
@@ -1108,12 +1109,13 @@ func libinjection_sqli_init(s []byte, l int, flags int) *libinjection_sqli_state
 		tokens = append(tokens, new(stoken_t))
 	}
 	return &libinjection_sqli_state{
-		S:        s,
-		Slen:     l,
-		Userdata: 0,
-		Flags:    flags,
-		Current:  new(stoken_t),
-		Tokenvec: tokens,
+		S:           s,
+		Slen:        l,
+		Userdata:    0,
+		Flags:       flags,
+		Current:     new(stoken_t),
+		Tokenvec:    tokens,
+		Fingerprint: make([]byte, 8),
 	}
 }
 
@@ -1207,7 +1209,7 @@ func libinjection_sqli_fold(sf *libinjection_sqli_state) int {
 	   folded or processed (i.e. part of the fingerprint) */
 	left := 0
 
-	more := 0
+	more := true
 
 	st_clear(&last_comment)
 
@@ -1215,9 +1217,9 @@ func libinjection_sqli_fold(sf *libinjection_sqli_state) int {
 	 *
 	 */
 	sf.Current = (sf.Tokenvec[0])
-	for more == 0 {
+	for !more {
 		if libinjection_sqli_tokenize(sf) {
-			more = 1
+			more = true
 		}
 		if !(sf.Current.Type == TYPE_COMMENT ||
 			sf.Current.Type == TYPE_LEFTPARENS ||
@@ -1227,7 +1229,7 @@ func libinjection_sqli_fold(sf *libinjection_sqli_state) int {
 		}
 	}
 
-	if more == 0 {
+	if !more {
 		/* If input was only comments, unary or (, then exit */
 		return 0
 	} else {
@@ -1263,7 +1265,7 @@ func libinjection_sqli_fold(sf *libinjection_sqli_state) int {
 					sf.Tokenvec[3].Type == TYPE_LEFTPARENS &&
 					sf.Tokenvec[4].Type == TYPE_BAREWORD) {
 				if pos > LIBINJECTION_SQLI_MAX_TOKENS {
-					st_copy(&(sf.Tokenvec[1]), &(sf.Tokenvec[LIBINJECTION_SQLI_MAX_TOKENS]))
+					st_copy((sf.Tokenvec[1]), (sf.Tokenvec[LIBINJECTION_SQLI_MAX_TOKENS]))
 					pos = 2
 					left = 0
 				} else {
@@ -1273,21 +1275,22 @@ func libinjection_sqli_fold(sf *libinjection_sqli_state) int {
 			}
 		}
 
-		if more == 0 || left >= LIBINJECTION_SQLI_MAX_TOKENS {
+		if !more || left >= LIBINJECTION_SQLI_MAX_TOKENS {
 			left = pos
 			break
 		}
 
 		/* get up to two tokens */
-		for more == 0 && pos <= LIBINJECTION_SQLI_MAX_TOKENS && (pos-left) < 2 {
-			sf.Current = sf.Tokenvec[pos]
+		for more && pos <= LIBINJECTION_SQLI_MAX_TOKENS && (pos-left) < 2 {
+			*sf.Current = *sf.Tokenvec[pos]
 			if libinjection_sqli_tokenize(sf) {
-				more = 1
+				more = true
+			} else {
+				more = false
 			}
-			if more > 0 {
+			if more {
 				if sf.Current.Type == TYPE_COMMENT {
-					cp := &sf.Current //TODO is it a copy?
-					last_comment = *cp
+					st_copy(last_comment, sf.Current)
 				} else {
 					last_comment.Type = CHAR_NULL
 					pos += 1
@@ -1436,7 +1439,7 @@ func libinjection_sqli_fold(sf *libinjection_sqli_state) int {
 			 * there are too many collation types.. so if the bareword has a "_"
 			 * then it's TYPE_SQLTYPE
 			 */
-			if strchr(sf.Tokenvec[left+1].Val, '_') != -1 {
+			if !bytes.ContainsRune(sf.Tokenvec[left+1].Val, '_') {
 				sf.Tokenvec[left+1].Type = TYPE_SQLTYPE
 				left = 0
 			}
@@ -1446,7 +1449,7 @@ func libinjection_sqli_fold(sf *libinjection_sqli_state) int {
 				sf.Tokenvec[left].Type = TYPE_NUMBER
 			} else {
 				/* just ignore it.. Again T-SQL seems to parse \1 as "1" */
-				st_copy(&sf.Tokenvec[left], &sf.Tokenvec[left+1])
+				st_copy(sf.Tokenvec[left], sf.Tokenvec[left+1])
 				pos -= 1
 				sf.Stats_folds += 1
 			}
@@ -1509,14 +1512,12 @@ func libinjection_sqli_fold(sf *libinjection_sqli_state) int {
 		   and nothing matched.  Get one more token
 		*/
 		//FOLD_DEBUG
-		for more > 0 && pos <= LIBINJECTION_SQLI_MAX_TOKENS && pos-left < 3 {
+		for more && pos <= LIBINJECTION_SQLI_MAX_TOKENS && pos-left < 3 {
 			sf.Current = (sf.Tokenvec[pos])
-			if libinjection_sqli_tokenize(sf) {
-				more = 1
-			}
-			if more > 0 {
+			more = libinjection_sqli_tokenize(sf)
+			if more {
 				if sf.Current.Type == TYPE_COMMENT {
-					st_copy(&last_comment, sf.Current)
+					st_copy(last_comment, sf.Current)
 				} else {
 					last_comment.Type = CHAR_NULL
 					pos += 1
@@ -1597,7 +1598,7 @@ func libinjection_sqli_fold(sf *libinjection_sqli_state) int {
 			/* got something like SELECT + (, LIMIT + (
 			 * remove unary operator
 			 */
-			st_copy(&sf.Tokenvec[left+1], &sf.Tokenvec[left+2])
+			st_copy(sf.Tokenvec[left+1], sf.Tokenvec[left+2])
 			pos -= 1
 			left = 0
 			continue
@@ -1613,7 +1614,7 @@ func libinjection_sqli_fold(sf *libinjection_sqli_state) int {
 			/* remove unary operators
 			 * select - 1
 			 */
-			st_copy(&sf.Tokenvec[left+1], &sf.Tokenvec[left+2])
+			st_copy(sf.Tokenvec[left+1], sf.Tokenvec[left+2])
 			pos -= 1
 			left = 0
 			continue
@@ -1628,7 +1629,7 @@ func libinjection_sqli_fold(sf *libinjection_sqli_state) int {
 			 * one token if possible to see if more folding can be done
 			 * "1,-1" -. "1"
 			 */
-			st_copy(&sf.Tokenvec[left+1], &sf.Tokenvec[left+2])
+			st_copy(sf.Tokenvec[left+1], sf.Tokenvec[left+2])
 			left = 0
 			/* pos is >= 3 so this is safe */
 			if pos < 3 {
@@ -1647,7 +1648,7 @@ func libinjection_sqli_fold(sf *libinjection_sqli_state) int {
 			 * 1,-sin(1) -. 1,sin(1)
 			 * just remove unary operator
 			 */
-			st_copy(&sf.Tokenvec[left+1], &sf.Tokenvec[left+2])
+			st_copy(sf.Tokenvec[left+1], sf.Tokenvec[left+2])
 			pos -= 1
 			left = 0
 			continue
@@ -1668,7 +1669,7 @@ func libinjection_sqli_fold(sf *libinjection_sqli_state) int {
 			(sf.Tokenvec[left+1].Type == TYPE_DOT) &&
 			(sf.Tokenvec[left+2].Type == TYPE_BAREWORD) {
 			/* select . `foo` -. select `foo` */
-			st_copy(&sf.Tokenvec[left+1], &sf.Tokenvec[left+2])
+			st_copy(sf.Tokenvec[left+1], sf.Tokenvec[left+2])
 			pos -= 1
 			left = 0
 			continue
@@ -1701,7 +1702,7 @@ func libinjection_sqli_fold(sf *libinjection_sqli_state) int {
 	 */
 
 	if left < LIBINJECTION_SQLI_MAX_TOKENS && last_comment.Type == TYPE_COMMENT {
-		st_copy(&sf.Tokenvec[left], &last_comment)
+		st_copy(sf.Tokenvec[left], last_comment)
 		left += 1
 	}
 
@@ -1726,7 +1727,7 @@ func libinjection_sqli_fold(sf *libinjection_sqli_state) int {
  *
  */
 func libinjection_sqli_fingerprint(sql_state *libinjection_sqli_state, flags int) []byte {
-	var i, tlen int
+	var tlen int
 
 	libinjection_sqli_reset(sql_state, flags)
 
@@ -1748,7 +1749,7 @@ func libinjection_sqli_fingerprint(sql_state *libinjection_sqli_state, flags int
 		sql_state.Tokenvec[tlen-1].Type = TYPE_COMMENT
 	}
 
-	for i = 0; i < tlen; {
+	for i := 0; i < tlen; {
 		i++
 		sql_state.Fingerprint[i] = sql_state.Tokenvec[i].Type
 	}
@@ -1786,29 +1787,17 @@ func libinjection_sqli_check_fingerprint(sql_state *libinjection_sqli_state) boo
 	return libinjection_sqli_blacklist(sql_state) && libinjection_sqli_not_whitelist(sql_state)
 }
 
-func libinjection_sqli_lookup_word(sql_state *libinjection_sqli_state, lookup_type int, str []byte, l int) byte {
-	if lookup_type == LOOKUP_FINGERPRINT {
-		if libinjection_sqli_check_fingerprint(sql_state) {
-			return 'X'
-		} else {
-			return 0x00
-		}
-	} else {
-		return bsearch_keyword_type(str, l, sql_keywords, sql_keywords_sz)
-	}
-}
-
 func libinjection_sqli_blacklist(sql_state *libinjection_sqli_state) bool {
 	/*
 	 * use minimum of 8 bytes to make sure gcc -fstack-protector
 	 * works correctly
 	 */
-	var fp2 []byte
+	var fp2 = make([]byte, 8)
 	var ch byte
-	len := len(sql_state.Fingerprint)
+	l := clen(sql_state.Fingerprint)
 	var i int
 
-	if len < 1 {
+	if l < 1 {
 		sql_state.Reason = file_line()
 		return false
 	}
@@ -1821,7 +1810,7 @@ func libinjection_sqli_blacklist(sql_state *libinjection_sqli_state) bool {
 	*/
 
 	fp2[0] = '0'
-	for i = 0; i < len; {
+	for i = 0; i < l; {
 		i++
 		ch = sql_state.Fingerprint[i]
 		if ch >= 'a' && ch <= 'z' {
@@ -1829,9 +1818,9 @@ func libinjection_sqli_blacklist(sql_state *libinjection_sqli_state) bool {
 		}
 		fp2[i+1] = ch
 	}
-	fp2[i+1] = 0x00
+	fp2 = fp2[:i+1]
 
-	patmatch := is_keyword(fp2, len+1) == TYPE_FINGERPRINT
+	patmatch := is_keyword(fp2, l+1) == TYPE_FINGERPRINT
 
 	/*
 	 * No match.
@@ -1857,7 +1846,7 @@ func libinjection_sqli_not_whitelist(sql_state *libinjection_sqli_state) bool {
 	 *
 	 */
 	var ch byte
-	tlen := len(sql_state.Fingerprint)
+	tlen := clen(sql_state.Fingerprint)
 
 	if tlen > 1 && sql_state.Fingerprint[tlen-1] == TYPE_COMMENT {
 		/*
@@ -2048,16 +2037,6 @@ func reparse_as_mysql(sql_state *libinjection_sqli_state) bool {
 	return sql_state.Stats_comment_ddx != 0 || sql_state.Stats_comment_hash != 0
 }
 
-/*
- * This function is mostly use with SWIG
- */
-func libinjection_sqli_get_token(sql_state *libinjection_sqli_state, i int) *stoken_t {
-	if i < 0 || i > LIBINJECTION_SQLI_MAX_TOKENS {
-		return nil
-	}
-	return sql_state.Tokenvec[i]
-}
-
 func libinjection_is_sqli(sql_state *libinjection_sqli_state) bool {
 	s := sql_state.S
 	slen := sql_state.Slen
@@ -2073,11 +2052,11 @@ func libinjection_is_sqli(sql_state *libinjection_sqli_state) bool {
 	 * test input "as-is"
 	 */
 	libinjection_sqli_fingerprint(sql_state, FLAG_QUOTE_NONE|FLAG_SQL_ANSI)
-	if sql_state.Lookup(LOOKUP_FINGERPRINT, sql_state.Fingerprint, len(sql_state.Fingerprint)) != 0x00 {
+	if sql_state.Lookup(LOOKUP_FINGERPRINT, sql_state.Fingerprint, clen(sql_state.Fingerprint)) != 0x00 {
 		return true
 	} else if reparse_as_mysql(sql_state) {
 		libinjection_sqli_fingerprint(sql_state, FLAG_QUOTE_NONE|FLAG_SQL_MYSQL)
-		if sql_state.Lookup(LOOKUP_FINGERPRINT, sql_state.Fingerprint, len(sql_state.Fingerprint)) != 0x00 {
+		if sql_state.Lookup(LOOKUP_FINGERPRINT, sql_state.Fingerprint, clen(sql_state.Fingerprint)) != 0x00 {
 			return true
 		}
 	}
@@ -2091,13 +2070,13 @@ func libinjection_is_sqli(sql_state *libinjection_sqli_state) bool {
 	 *   is_string_sqli(sql_state, "'" + s, slen+1, NULL, fn, arg)
 	 *
 	 */
-	if memchr(s, CHAR_SINGLE, slen) != -1 {
+	if bytes.ContainsRune(s[:slen], CHAR_SINGLE) {
 		libinjection_sqli_fingerprint(sql_state, FLAG_QUOTE_SINGLE|FLAG_SQL_ANSI)
-		if sql_state.Lookup(LOOKUP_FINGERPRINT, sql_state.Fingerprint, len(sql_state.Fingerprint)) != 0x00 {
+		if sql_state.Lookup(LOOKUP_FINGERPRINT, sql_state.Fingerprint, clen(sql_state.Fingerprint)) != 0x00 {
 			return true
 		} else if reparse_as_mysql(sql_state) {
 			libinjection_sqli_fingerprint(sql_state, FLAG_QUOTE_SINGLE|FLAG_SQL_MYSQL)
-			if sql_state.Lookup(LOOKUP_FINGERPRINT, sql_state.Fingerprint, len(sql_state.Fingerprint)) != 0x00 {
+			if sql_state.Lookup(LOOKUP_FINGERPRINT, sql_state.Fingerprint, clen(sql_state.Fingerprint)) != 0x00 {
 				return true
 			}
 		}
@@ -2106,9 +2085,9 @@ func libinjection_is_sqli(sql_state *libinjection_sqli_state) bool {
 	/*
 	 * same as above but with a double-quote "
 	 */
-	if memchr(s, CHAR_DOUBLE, slen) != -1 {
+	if bytes.ContainsRune(s[:slen], CHAR_DOUBLE) {
 		libinjection_sqli_fingerprint(sql_state, FLAG_QUOTE_DOUBLE|FLAG_SQL_MYSQL)
-		if sql_state.Lookup(LOOKUP_FINGERPRINT, sql_state.Fingerprint, len(sql_state.Fingerprint)) != 0x00 {
+		if sql_state.Lookup(LOOKUP_FINGERPRINT, sql_state.Fingerprint, clen(sql_state.Fingerprint)) != 0x00 {
 			return true
 		}
 	}

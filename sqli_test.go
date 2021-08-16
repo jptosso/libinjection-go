@@ -2,9 +2,9 @@ package libinjection
 
 import "testing"
 
-func TestBasicSqli(t *testing.T) {
-	res, _ := IsSqli([]byte("' or ''='"))
-	if !res {
-		t.Error("failed to find sqli")
+func TestSqli(t *testing.T) {
+	sqli, _ := IsSqli([]byte("' or ''='"))
+	if !sqli {
+		t.Error("Failed to test sqli")
 	}
 }
