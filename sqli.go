@@ -394,7 +394,7 @@ func parse_slash(sf *libinjection_sqli_state) int {
 	/*
 	 * skip over initial '/x'
 	 */
-	ptr := memchr2(cs[cur+2:], slen-(pos+2), '*', '/')
+	ptr := bytes.IndexAny(cs[cur+2:slen-(pos+2)], "/*")
 	if ptr == -1 {
 		/* till end of line */
 		clen = slen - pos
@@ -412,7 +412,7 @@ func parse_slash(sf *libinjection_sqli_state) int {
 	 *  are an automatic black ban!
 	 */
 
-	if ptr != -1 && memchr2(cs[cur+2:], (ptr-(cur+1)), '/', '*') != -1 {
+	if ptr != -1 && bytes.ContainsAny(cs[cur+2:(ptr-(cur+1))], "/*") {
 		ctype = TYPE_EVIL
 	} else if is_mysql_comment(cs, slen, pos) {
 		ctype = TYPE_EVIL
@@ -490,7 +490,7 @@ func parse_operator2(sf *libinjection_sqli_state) int {
  */
 func is_backslash_escaped(str []byte) bool {
 	var ptr int
-	end := len(str) - 1
+	end := clen(str) - 1
 	for ptr = end; ptr >= 0; ptr-- {
 		if str[ptr] != '\\' {
 			break
@@ -502,7 +502,7 @@ func is_backslash_escaped(str []byte) bool {
 }
 
 func is_double_delim_escaped(cur []byte) bool {
-	return 1 < len(cur)-1 && cur[1] == cur[0]
+	return 1 < clen(cur)-1 && cur[1] == cur[0]
 }
 
 /* Look forward for doubling of delimiter
@@ -544,7 +544,7 @@ func parse_string_core(cs []byte, l int, pos int, st *stoken_t, delim byte, offs
 			st_assign(st, TYPE_STRING, pos+offset, l-pos-offset, cs[pos+offset:])
 			st.StrClose = CHAR_NULL
 			return l
-		} else if is_backslash_escaped(cs[qpos-1 : qpos-1+pos+offset]) {
+		} else if is_backslash_escaped(cs[qpos-1:]) {
 			/* keep going, move ahead one character */
 			qpos = bytes.IndexByte(cs[qpos+1:qpos+1+(l-(qpos+1))], delim)
 			continue
@@ -927,7 +927,7 @@ func parse_money(sf *libinjection_sqli_state) int {
 			}
 
 			/* we have $foobar$ ... find it again */
-			strend = my_memmem(cs[pos+xlen+2:], slen-(pos+xlen+2), cs[pos:], xlen+2)
+			strend = bytes.IndexAny(cs[pos+xlen+2:], string(cs[pos:pos+xlen+2]))
 
 			// TODO check
 			if strend > slen {
@@ -1768,7 +1768,7 @@ func libinjection_sqli_fingerprint(sql_state *libinjection_sqli_state, flags int
 	 * or other syntax that isn't consistent.
 	 * Should be very rare false positive
 	 */
-	if strchr(sql_state.Fingerprint, TYPE_EVIL) != -1 {
+	if bytes.ContainsRune(sql_state.Fingerprint, TYPE_EVIL) {
 		/*  needed for SWIG */
 		sql_state.Fingerprint = make([]byte, LIBINJECTION_SQLI_MAX_TOKENS+1)
 		sql_state.Tokenvec[0].Val = make([]byte, LIBINJECTION_SQLI_TOKEN_SIZE)
@@ -1856,7 +1856,7 @@ func libinjection_sqli_not_whitelist(sql_state *libinjection_sqli_state) bool {
 		 * this "feature" of SQL Server but seems to be known SQLi
 		 * technique
 		 */
-		if my_memmem(sql_state.S, sql_state.Slen, []byte("sp_password"), 11) != -1 {
+		if bytes.ContainsAny(sql_state.S, "sp_password") {
 			sql_state.Reason = file_line()
 			return true
 		}
