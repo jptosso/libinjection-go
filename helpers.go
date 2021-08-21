@@ -73,7 +73,7 @@ func strlenspn(s []byte, l int, accept string) int {
 
 func strlencspn(s []byte, l int, accept string) int {
 	for i := 0; i < l; i++ {
-		if !strings.ContainsRune(accept, rune(s[i])) {
+		if strings.ContainsRune(accept, rune(s[i])) {
 			return i
 		}
 	}
