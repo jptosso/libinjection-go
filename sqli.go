@@ -182,9 +182,11 @@ func (st *stoken_t) Assign_char(stype byte, pos int, l int, value byte) {
 
 func (st *stoken_t) Assign(stype byte, pos int, l int, value []byte) {
 	const MSIZE = LIBINJECTION_SQLI_TOKEN_SIZE
-	last := MSIZE - 1
+	last := 0
 	if l < MSIZE {
-		last = l
+		last = l - 1
+	} else {
+		last = MSIZE - 1
 	}
 	st.Type = stype
 	st.Pos = pos

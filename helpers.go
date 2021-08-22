@@ -118,6 +118,10 @@ func char_is_white(ch byte) bool {
 
 func cstrcasecmp(a string, b []byte, n int) int {
 	i := 0
+	l := len(b)
+	if l <= n {
+		n = l
+	}
 	for n > 0 {
 		cb := b[i]
 		if cb >= 'a' && cb <= 'z' {

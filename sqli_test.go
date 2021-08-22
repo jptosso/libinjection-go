@@ -28,7 +28,12 @@ func print_string(buf []byte, l int, t *stoken_t) ([]byte, int) {
 
 	/* print opening quote */
 	if t.StrOpen != '\x00' {
-		buf[l] = t.StrOpen
+		if len(buf) >= l {
+			buf = append(buf, t.StrOpen)
+		} else {
+			buf[l] = t.StrOpen
+		}
+
 		slen = 1
 		l += slen
 	}
@@ -64,7 +69,11 @@ func print_var(buf []byte, l int, t *stoken_t) ([]byte, int) {
 	}
 	if t.Count == 2 {
 		slen = 1
-		buf[l] = '@'
+		if len(buf) <= l {
+			buf = append(buf, '@')
+		} else {
+			buf[l] = '@'
+		}
 		l += slen
 	}
 	return print_string(buf, l, t)

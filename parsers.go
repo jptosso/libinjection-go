@@ -2,6 +2,7 @@ package libinjection
 
 import (
 	"bytes"
+	"fmt"
 	"unicode"
 )
 
@@ -460,8 +461,8 @@ func parse_word(sf *libinjection_sqli_state) int {
 	/* now we need to look inside what we good for "." and "`"
 	 * and see if what is before is a keyword or not
 	 */
-	for i := 0; i < sf.Current.Len-1; {
-		i++
+	fmt.Println(sf.Current.Len, sf.Current.Val)
+	for i := 0; i < len(sf.Current.Val); i++ {
 		delim = sf.Current.Val[i]
 		if delim == '.' || delim == '`' {
 			ch = sf.Lookup(LOOKUP_WORD, sf.Current.Val, i)
