@@ -156,3 +156,30 @@ func clen(b []byte) int {
 		}
 	}
 }
+
+/**
+ *
+ *
+ *
+ * Porting Notes:
+ *  given a mapping/hash of string to char
+ *  this is just
+ *    typecode = mapping[key.upper()]
+ */
+func bsearch_keyword_type(key []byte, klen int, keywords []keyword_t, numb int) byte {
+	left := 0
+	right := numb - 1
+	for left < right {
+		pos := (left + right) >> 1
+		if cstrcasecmp(keywords[left].Word, key, klen) == 0 {
+			left = pos + 1
+		} else {
+			right = pos
+		}
+	}
+	if (left == right) && cstrcasecmp(keywords[left].Word, key, klen) == 0 {
+		return keywords[left].Type
+	} else {
+		return CHAR_NULL
+	}
+}

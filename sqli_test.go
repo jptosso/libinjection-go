@@ -37,7 +37,11 @@ func print_string(buf []byte, l int, t *stoken_t) ([]byte, int) {
 	s := fmt.Sprintf("%s ", t.Val)
 	slen = clen([]byte(s))
 	for i := range s {
-		buf[l+i] = s[i]
+		if l+i >= len(buf) {
+			buf = append(buf, s[i])
+		} else {
+			buf[l+i] = s[i]
+		}
 	}
 	l += slen
 
@@ -130,11 +134,11 @@ func TestEngine(t *testing.T) {
 		g_actual := []byte{}
 		slen := 0
 		flags := 0
-		fmt.Printf("Testing %s\n", tinput)
+		fmt.Printf("%s (%s): %s\n", fn, tname, tinput)
 		switch tp {
 		case "tokens":
-			sf := libinjection_sqli_init([]byte(tinput), len(tinput), FLAG_QUOTE_NONE|FLAG_SQL_ANSI)
-			for libinjection_sqli_tokenize(sf) {
+			sf := NewSqli([]byte(tinput), len(tinput), FLAG_QUOTE_NONE|FLAG_SQL_ANSI)
+			for sf.Tokenize() {
 				g_actual, slen = print_token(g_actual, 0, sf.Current)
 				fmt.Println(string(g_actual))
 			}
