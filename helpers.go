@@ -1,189 +1,117 @@
 package libinjection
 
-import (
-	"bytes"
-	"fmt"
-	"runtime"
-	"strconv"
-	"strings"
-)
+import "strings"
 
-func file_line() int {
-	_, fileName, fileLine, ok := runtime.Caller(1)
-	var s string
-	if ok {
-		s = fmt.Sprintf("%s:%d", fileName, fileLine)
-	} else {
-		s = ""
+func strlencspn(s string, unaccepted string) int {
+	l := len(s)
+	for i := 0; i < l; i++ {
+		if strings.IndexByte(unaccepted, s[1]) != -1 {
+			return i
+		}
 	}
-	l, _ := strconv.Atoi(s)
+	return len(s)
+}
+
+func strlenspn(s string, accept string) int {
+	l := len(s)
+	for i := 0; i < l; i++ {
+		if strings.IndexByte(accept, s[i]) == -1 {
+			return i
+		}
+	}
 	return l
 }
 
-func streq(s1 []byte, s2 string) bool {
-	if clen(s1) != len(s2) {
-		return false
-	}
-	for i := range s1 {
-		if s1[i] != s2[i] {
-			return false
-		}
-	}
-	return true
-}
-
-/**
- * Initializes parsing state
- *
- */
 func flag2delim(flag int) byte {
-	if flag&FLAG_QUOTE_SINGLE == 1 {
+	if (flag & FLAG_QUOTE_SINGLE) != 0 {
 		return CHAR_SINGLE
-	} else if flag&FLAG_QUOTE_DOUBLE == 1 {
+	} else if (flag & FLAG_QUOTE_DOUBLE) != 0 {
 		return CHAR_DOUBLE
 	} else {
 		return CHAR_NULL
 	}
 }
 
-func st_clear(t **stoken_t) {
-	*t = new(stoken_t) //nil
+func is_double_delim_escaped(cur int, end int, s string) bool {
+	return ((cur + 1) < end) && (s[cur+1] == s[cur])
 }
 
-/** Find largest string containing certain characters.
- *
- * C Standard library 'strspn' only works for 'c-strings' (null terminated)
- * This works on arbitrary length.
- *
- * Performance notes:
- *   not critical
- *
- * Porting notes:
- *   if accept is 'ABC', then this function would be similar to
- *   a_regexp.match(a_str, '[ABC]*'),
+/*
+ * "  \"   " one backslash = escaped! " \\"   " two backslash = not escaped!
+ * "\\\"   " three backslash = escaped!
  */
-func strlenspn(s []byte, l int, accept string) int {
-	for i := 0; i < l; i++ {
-		if !strings.ContainsRune(accept, rune(s[i])) {
-			return i
+func is_backslash_escaped(end int, start int, s string) bool {
+	i := end
+
+	for i >= start {
+		if s[i] != '\\' {
+			break
 		}
+		i--
 	}
-	return l
+
+	return ((end - i) & 1) == 1
 }
 
-func strlencspn(s []byte, l int, accept string) int {
-	for i := 0; i < l; i++ {
-		if strings.ContainsRune(accept, rune(s[i])) {
-			return i
-		}
+/*
+ * This detects MySQL comments, comments that start with /x! We just ban
+ * these now but previously we attempted to parse the inside
+ *
+ * For reference: the form of /x![anything]x/ or /x!12345[anything] x/
+ *
+ * Mysql 3 (maybe 4), allowed this: /x!0selectx/ 1; where 0 could be any
+ * number.
+ *
+ * The last version of MySQL 3 was in 2003. It is unclear if the MySQL 3
+ * syntax was allowed in MySQL 4. The last version of MySQL 4 was in 2008
+ *
+ */
+func is_mysql_comment(s string, l int, pos int) bool {
+	/*
+	 * so far... s.charAt(pos) == '/' && s.charAt(pos+1) == '*'
+	 */
+
+	if pos+2 >= l {
+		/* not a mysql comment */
+		return false
 	}
-	return l
+
+	if s[pos+2] != '!' {
+		/* not a mysql comment */
+		return false
+	}
+
+	/*
+	 * this is a mysql comment got "/x!"
+	 */
+	return true
 }
 
 func char_is_white(ch byte) bool {
-	/* ' '  space is 0x32
-	   '\t  0x09 \011 horizontal tab
-	   '\n' 0x0a \012 new line
-	   '\v' 0x0b \013 vertical tab
-	   '\f' 0x0c \014 new page
-	   '\r' 0x0d \015 carriage return
-	        0x00 \000 null (oracle)
-	        0xa0 \240 is Latin-1
-	*/
-	b := []byte{
-		' ',
-		'\t',
-		'\n',
-		'\v',
-		'\f',
-		'\r',
-		'\240',
-		'\000',
-	}
-	return bytes.ContainsRune(b, rune(ch))
-}
+	/*
+	 * ' ' space is 0x20 '\t 0x09 \011 horizontal tab '\n' 0x0a \012 new
+	 * line '\v' 0x0b \013 vertical tab '\f' 0x0c \014 new page '\r' 0x0d
+	 * \015 carriage return 0x00 \000 null (oracle) 0xa0 \240 is Latin-1
+	 */
 
-/* DANGER DANGER
- * This is -very specialized function-
- *
- * this compares a ALL_UPPER CASE C STRING
- * with a *arbitrary memory* + length
- *
- * Sane people would just make a copy, up-case
- * and use a hash table.
- *
- * Required since libc version uses the current locale
- * and is much slower.
- */
-
-func cstrcasecmp(a string, b []byte, n int) int {
-	i := 0
-	l := len(b)
-	if l <= n {
-		n = l
-	}
-	for n > 0 {
-		cb := b[i]
-		if cb >= 'a' && cb <= 'z' {
-			cb -= 0x20
-		}
-		if a[i] != cb {
-			return int(a[i] - cb)
-		} else if a[i] == 0x00 {
-			return -1
-		}
-		i++
-		n--
-	}
-	if a[i] == 0 {
-		return 0
-	}
-	return 1
-}
-
-// Copy an interface into another
-func st_copy(s1 *stoken_t, s2 *stoken_t) {
-	s1.Pos = s2.Pos
-	s1.Len = s2.Len
-	s1.Count = s2.Count
-	s1.Type = s2.Type
-	s1.StrOpen = s2.StrOpen
-	s1.StrClose = s2.StrClose
-	s1.Val = s2.Val
-}
-
-func clen(b []byte) int {
-	l := len(b)
-	for i := 0; ; i++ {
-		if l >= i || b[i] == 0x00 {
-			return i
-		}
-	}
-}
-
-/**
- *
- *
- *
- * Porting Notes:
- *  given a mapping/hash of string to char
- *  this is just
- *    typecode = mapping[key.upper()]
- */
-func bsearch_keyword_type(key []byte, klen int, keywords []keyword_t, numb int) byte {
-	left := 0
-	right := numb - 1
-	for left < right {
-		pos := (left + right) >> 1
-		if cstrcasecmp(keywords[left].Word, key, klen) == 0 {
-			left = pos + 1
-		} else {
-			right = pos
-		}
-	}
-	if (left == right) && cstrcasecmp(keywords[left].Word, key, klen) == 0 {
-		return keywords[left].Type
-	} else {
-		return CHAR_NULL
+	switch ch {
+	case 0x20:
+		return true
+	case 0x09:
+		return true
+	case 0x0a:
+		return true
+	case 0x0b:
+		return true
+	case 0x0c:
+		return true
+	case 0x0d:
+		return true
+	case 0x00:
+		return true
+	case 0xa0:
+		return true
+	default:
+		return false
 	}
 }
